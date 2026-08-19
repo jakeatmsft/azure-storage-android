@@ -133,8 +133,10 @@ object TransferStateMachine {
     /** True if [from] -> [to] is a legal transition of the transfer state machine. */
     fun canTransition(from: TransferState, to: TransferState): Boolean {
         if (from == to) return false
-        // Completed records must not be silently reset.
-        if (from in terminal && from == TransferState.COMPLETED) return false
+        // Completed records must not be silently reset; enforced explicitly here
+        // even though `allowedTransitions[COMPLETED]` is already empty, so the
+        // invariant holds even if the map is edited in the future.
+        if (from == TransferState.COMPLETED) return false
         return allowedTransitions[from]?.contains(to) == true
     }
 

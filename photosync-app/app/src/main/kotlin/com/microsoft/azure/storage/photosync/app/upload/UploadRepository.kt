@@ -66,6 +66,12 @@ class UploadRepository(
                     return UploadOutcome.PermanentFailure("Missing localMediaId")
                 }
 
+                val localFile = localFileDao.findByMediaId(current.localMediaId)
+                if (localFile == null) {
+                    markFailed(current, "Source media file no longer available")
+                    return UploadOutcome.PermanentFailure("Source media file no longer available")
+                }
+
                 current = transition(current, TransferState.AUTHORIZING)
 
                 val idempotencyKey = current.transferId
@@ -76,8 +82,8 @@ class UploadRepository(
                         fileName = current.fileName,
                         fileSize = current.fileSize,
                         contentType = current.contentType,
-                        capturedUtcEpochMillis = null,
-                        modifiedUtcEpochMillis = System.currentTimeMillis(),
+                        capturedUtcEpochMillis = localFile.capturedUtcEpochMillis,
+                        modifiedUtcEpochMillis = localFile.modifiedUtcEpochMillis,
                         sha256 = null,
                         idempotencyKey = idempotencyKey
                     ),
@@ -97,12 +103,7 @@ class UploadRepository(
                 current = transfer(current) // persist blob identity before uploading content
                 current = transition(current, TransferState.TRANSFERRING)
 
-                val sourceUri = localFileDao.findByMediaId(current.localMediaId)?.let { Uri.parse(it.filePath) }
-                if (sourceUri == null) {
-                    markFailed(current, "Source media file no longer available")
-                    return UploadOutcome.PermanentFailure("Source media file no longer available")
-                }
-
+                val sourceUri = Uri.parse(localFile.filePath)
                 val sha256 = uploadBlobContent(body.sasUrl, sourceUri, current.fileSize)
                 current = current.copy(sha256 = sha256)
                 current = transfer(current)
@@ -164,10 +165,10 @@ class UploadRepository(
 
         context.contentResolver.openInputStream(sourceUri)?.use { rawStream ->
             if (calculateChecksum) {
-                // Stream once, computing the checksum while a tee copies bytes to
-                // the blob upload; a straightforward two-pass approach (read once
-                // for checksum, then again for upload) keeps memory bounded and
-                // avoids buffering the full file, at the cost of reading twice.
+                // Two-pass approach: read once (via a second stream) to compute
+                // the checksum, then read again to upload. This keeps memory
+                // bounded and avoids buffering the full file, at the cost of
+                // reading the source content twice.
                 val checksum = context.contentResolver.openInputStream(sourceUri)?.use { checksumStream ->
                     Sha256.of(checksumStream)
                 }

@@ -28,7 +28,7 @@ data class PendingStateUpdate(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val transferId: String,
-    /** "complete", "fail", "heartbeat", or "cancel". */
+    /** "complete_upload", "complete_download" (see UploadRepository/DownloadRepository/StateUpdateWorker). */
     val updateType: String,
     /** JSON-encoded request body appropriate for [updateType]. */
     val payloadJson: String,
