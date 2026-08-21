@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Photo Sync</string>
+
+    <string name="notification_channel_transfers">File transfers</string>
+    <string name="notification_uploading_title">Uploading photos…</string>
+    <string name="notification_downloading_title">Downloading files…</string>
+
+    <string name="dashboard_title">Dashboard</string>
+    <string name="dashboard_mode_label">Mode</string>
+    <string name="dashboard_device_label">Device</string>
+    <string name="dashboard_charging_label">Charging</string>
+    <string name="dashboard_network_label">Network</string>
+    <string name="dashboard_pending_label">Pending transfers</string>
+    <string name="dashboard_failed_label">Failed transfers</string>
+    <string name="dashboard_last_sync_label">Last successful sync</string>
+    <string name="dashboard_storage_label">Available storage</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_sync_now">Sync now</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_upload_section">Upload settings</string>
+    <string name="settings_download_section">Download settings</string>
+    <string name="settings_choose_destination">Choose destination folder</string>
+
+    <string name="history_title">Transfer History</string>
+    <string name="history_filter_direction">Direction</string>
+    <string name="history_filter_state">State</string>
+</resources>
