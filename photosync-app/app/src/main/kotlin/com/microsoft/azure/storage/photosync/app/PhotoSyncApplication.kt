@@ -40,6 +40,7 @@ class PhotoSyncApplication : Application() {
                 context = applicationContext,
                 mode = settings.getAppMode(),
                 uploadWifiOnly = settings.isUploadWifiOnly(),
+                uploadChargingOnly = settings.isUploadChargingOnly(),
                 downloadWifiOnly = settings.isDownloadWifiOnly()
             )
         }

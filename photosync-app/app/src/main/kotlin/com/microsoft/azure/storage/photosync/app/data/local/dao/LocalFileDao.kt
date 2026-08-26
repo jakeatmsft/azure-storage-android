@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface LocalFileDao {
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(file: LocalFile): Long
 
     @Query("SELECT * FROM local_file WHERE mediaId = :mediaId")
@@ -39,4 +39,7 @@ interface LocalFileDao {
 
     @Query("SELECT MAX(modifiedUtcEpochMillis) FROM local_file")
     suspend fun latestKnownModifiedUtc(): Long?
+
+    @Query("DELETE FROM local_file")
+    suspend fun deleteAll(): Int
 }

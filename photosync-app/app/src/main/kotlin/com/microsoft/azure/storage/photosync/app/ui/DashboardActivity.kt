@@ -15,21 +15,27 @@
 
 package com.microsoft.azure.storage.photosync.app.ui
 
-import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.os.BatteryManager
 import android.os.Bundle
-import android.os.StatFs
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.microsoft.azure.storage.photosync.app.AppContainer
 import com.microsoft.azure.storage.photosync.app.R
 import com.microsoft.azure.storage.photosync.app.WorkScheduler
 import com.microsoft.azure.storage.photosync.app.data.local.entity.AppMode
 import com.microsoft.azure.storage.photosync.app.databinding.ActivityDashboardBinding
+import com.microsoft.azure.storage.photosync.app.download.DownloadManifestWorker
+import com.microsoft.azure.storage.photosync.app.download.DownloadWorker
 import com.microsoft.azure.storage.photosync.app.upload.PhotoDiscoveryWorker
 import com.microsoft.azure.storage.photosync.app.upload.UploadWorker
+import com.microsoft.azure.storage.photosync.app.util.DestinationStorage
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
@@ -57,21 +63,19 @@ class DashboardActivity : AppCompatActivity() {
             startActivity(Intent(this, TransferHistoryActivity::class.java))
         }
         binding.buttonSyncNow.setOnClickListener {
-            WorkManager.getInstance(this).apply {
-                enqueue(androidx.work.OneTimeWorkRequestBuilder<PhotoDiscoveryWorker>().build())
-                enqueue(androidx.work.OneTimeWorkRequestBuilder<UploadWorker>().build())
-            }
+            lifecycleScope.launch { enqueueManualSync() }
         }
         binding.buttonPauseResume.setOnClickListener {
             lifecycleScope.launch {
                 val settings = container.settingsRepository
                 val current = settings.getAppMode()
-                val next = if (current == AppMode.PAUSED) AppMode.UPLOAD_AND_DOWNLOAD else AppMode.PAUSED
+                val next = if (current == AppMode.PAUSED) settings.getLastActiveAppMode() else AppMode.PAUSED
                 settings.setAppMode(next)
                 WorkScheduler.reschedule(
                     applicationContext,
                     next,
                     settings.isUploadWifiOnly(),
+                    settings.isUploadChargingOnly(),
                     settings.isDownloadWifiOnly()
                 )
                 render()
@@ -121,10 +125,19 @@ class DashboardActivity : AppCompatActivity() {
         binding.textLastSync.text = getString(R.string.dashboard_last_sync_label) + ": " +
             (lastSync?.let { DateFormat.getDateTimeInstance().format(Date(it)) } ?: "Never")
 
-        val stat = StatFs(filesDir.path)
-        val availableBytes = stat.availableBytes
-        binding.textStorage.text =
-            getString(R.string.dashboard_storage_label) + ": ${availableBytes / (1024 * 1024)} MB"
+        val destinationUri = settings.getDownloadDestinationUri()?.let(Uri::parse) ?: Uri.fromFile(filesDir)
+        val storage = runCatching { DestinationStorage(this).snapshot(destinationUri) }.getOrNull()
+        val minimumFreePercent = settings.getDownloadMinFreeStoragePercent()
+        binding.textStorage.text = if (storage == null) {
+            getString(R.string.dashboard_storage_unavailable)
+        } else {
+            getString(
+                R.string.dashboard_storage_value,
+                storage.availableBytes / (1024 * 1024),
+                storage.availablePercent,
+                minimumFreePercent
+            )
+        }
 
         binding.buttonPauseResume.setText(
             if (settings.getAppMode() == AppMode.PAUSED) R.string.action_resume else R.string.action_pause
@@ -134,5 +147,54 @@ class DashboardActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         lifecycleScope.launch { render() }
+    }
+
+    private suspend fun enqueueManualSync() {
+        val settings = AppContainer.getInstance(this).settingsRepository
+        val mode = settings.getAppMode()
+        if (mode == AppMode.PAUSED) return
+
+        val workManager = WorkManager.getInstance(this)
+        if (mode == AppMode.UPLOAD_ONLY || mode == AppMode.UPLOAD_AND_DOWNLOAD) {
+            val uploadNetwork = if (settings.isUploadWifiOnly()) NetworkType.UNMETERED else NetworkType.CONNECTED
+            val discovery = OneTimeWorkRequestBuilder<PhotoDiscoveryWorker>().build()
+            val upload = OneTimeWorkRequestBuilder<UploadWorker>()
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(uploadNetwork)
+                        .setRequiresCharging(settings.isUploadChargingOnly())
+                        .setRequiresBatteryNotLow(true)
+                        .setRequiresStorageNotLow(true)
+                        .build()
+                )
+                .build()
+            workManager.beginUniqueWork(MANUAL_UPLOAD_WORK, ExistingWorkPolicy.REPLACE, discovery)
+                .then(upload)
+                .enqueue()
+        }
+
+        if (mode == AppMode.DOWNLOAD_ONLY || mode == AppMode.UPLOAD_AND_DOWNLOAD) {
+            val downloadNetwork = if (settings.isDownloadWifiOnly()) NetworkType.UNMETERED else NetworkType.CONNECTED
+            val manifest = OneTimeWorkRequestBuilder<DownloadManifestWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(downloadNetwork).build())
+                .build()
+            val download = OneTimeWorkRequestBuilder<DownloadWorker>()
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(downloadNetwork)
+                        .setRequiresBatteryNotLow(true)
+                        .setRequiresStorageNotLow(true)
+                        .build()
+                )
+                .build()
+            workManager.beginUniqueWork(MANUAL_DOWNLOAD_WORK, ExistingWorkPolicy.REPLACE, manifest)
+                .then(download)
+                .enqueue()
+        }
+    }
+
+    companion object {
+        private const val MANUAL_UPLOAD_WORK = "manual-upload-sync"
+        private const val MANUAL_DOWNLOAD_WORK = "manual-download-sync"
     }
 }

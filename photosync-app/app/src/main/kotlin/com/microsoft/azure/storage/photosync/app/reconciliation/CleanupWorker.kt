@@ -25,9 +25,9 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Removes abandoned temporary ("*.part") download files from the
- * destination folder after the retention period, and prunes completed
- * transfer history older than the retention period (spec sections 13, 15:
- * "Local completed-history retention: 90 days").
+ * destination folder after the retention period. Completed upload and
+ * download records are retained as compact identity receipts so an unchanged
+ * source or remote blob is never transferred twice.
  */
 class CleanupWorker(
     private val appContext: Context,
@@ -38,9 +38,6 @@ class CleanupWorker(
         val container = AppContainer.getInstance(appContext)
         val settings = container.settingsRepository
         val now = System.currentTimeMillis()
-
-        container.database.localTransferDao()
-            .deleteCompletedOlderThan(now - TimeUnit.DAYS.toMillis(HISTORY_RETENTION_DAYS))
 
         val destinationUriString = settings.getDownloadDestinationUri()
         if (destinationUriString != null) {
@@ -62,7 +59,6 @@ class CleanupWorker(
 
     companion object {
         const val UNIQUE_WORK_NAME = "cleanup"
-        const val HISTORY_RETENTION_DAYS = 90L
         const val TEMP_FILE_RETENTION_HOURS = 24L
     }
 }

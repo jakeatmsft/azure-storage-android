@@ -18,6 +18,7 @@ package com.microsoft.azure.storage.photosync.app.download
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.microsoft.azure.storage.StorageException
 import com.microsoft.azure.storage.photosync.app.AppContainer
 import com.microsoft.azure.storage.photosync.app.data.local.entity.LocalTransfer
 import com.microsoft.azure.storage.photosync.app.security.CredentialStore
@@ -44,12 +45,27 @@ class DownloadManifestWorker(
         val container = AppContainer.getInstance(appContext)
         val settings = container.settingsRepository
         val deviceId = settings.getOrCreateDeviceId()
-        val baseUrl = settings.getApiBaseUrl()
-        if (baseUrl.isBlank() || settings.getDownloadDestinationUri() == null) {
-            return Result.failure()
-        }
+        if (settings.getDownloadDestinationUri() == null) return Result.failure()
 
         val credentialStore = CredentialStore(appContext)
+        val directConfiguration = credentialStore.getAzureSasConfiguration()
+        if (directConfiguration != null) {
+            return try {
+                DirectSasDownloadDiscovery(
+                    directConfiguration,
+                    container.database.localTransferDao()
+                ).discover(deviceId)
+                Result.success()
+            } catch (e: StorageException) {
+                if (e.httpStatusCode in RETRYABLE_HTTP_CODES) Result.retry() else Result.failure()
+            } catch (e: java.io.IOException) {
+                Result.retry()
+            }
+        }
+
+        val baseUrl = settings.getApiBaseUrl()
+        if (baseUrl.isBlank()) return Result.failure()
+
         val api = container.apiService(baseUrl) { credentialStore.getToken() }
         val transferDao = container.database.localTransferDao()
 
@@ -61,7 +77,8 @@ class DownloadManifestWorker(
 
             val completedKeys = transferDao.completedIdentityKeys(TransferDirection.DOWNLOAD.name).toSet()
 
-            for (item in response.body()!!.items) {
+            val manifestReceivedAt = System.currentTimeMillis()
+            for ((manifestPosition, item) in response.body()!!.items.withIndex()) {
                 val identity = TransferIdentity.DownloadIdentity(
                     deviceId = deviceId,
                     blobContainer = item.blobContainer,
@@ -89,7 +106,10 @@ class DownloadManifestWorker(
                         blobEtagOrVersion = item.blobEtagOrVersion,
                         sha256 = item.sha256,
                         destinationUri = null,
-                        state = TransferState.QUEUED.name
+                        state = TransferState.QUEUED.name,
+                        // Preserve server manifest order even when several rows
+                        // are inserted during the same clock millisecond.
+                        createdUtcEpochMillis = manifestReceivedAt + manifestPosition
                     )
                 )
             }

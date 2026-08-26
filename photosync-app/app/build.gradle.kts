@@ -59,13 +59,12 @@ android {
 
 dependencies {
     implementation(project(":core"))
-    // The existing Azure Storage Android SDK library, used to upload/download
-    // block blob content via short-lived SAS URLs obtained from the API.
-    // In this repo it is consumed as a project dependency on the legacy
-    // `:microsoft-azure-storage` module; when this app module is extracted
-    // into its own build it should instead depend on the published AAR
-    // (`com.microsoft.azure.android:azure-storage-android`).
-    implementation(files("${project.projectDir}/../../microsoft-azure-storage/build/libs/microsoft-azure-storage.jar"))
+    // Block-blob transfers use either short-lived SAS URLs obtained from the
+    // API or the encrypted SAS configuration provisioned by QR code.
+    // The published AAR keeps this independent build decoupled from the
+    // repository's legacy Gradle 3.3 SDK build.
+    implementation("com.microsoft.azure.android:azure-storage-android:2.0.0@aar")
+    implementation("com.fasterxml.jackson.core:jackson-core:2.6.0")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -75,6 +74,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
@@ -88,6 +88,7 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 

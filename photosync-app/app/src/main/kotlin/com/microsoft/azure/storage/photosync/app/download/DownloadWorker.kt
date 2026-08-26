@@ -26,14 +26,16 @@ import android.content.Context
 import androidx.work.WorkerParameters
 import com.microsoft.azure.storage.photosync.app.AppContainer
 import com.microsoft.azure.storage.photosync.app.R
+import com.microsoft.azure.storage.photosync.app.data.remote.AzureSasBlobClient
 import com.microsoft.azure.storage.photosync.app.security.CredentialStore
+import com.microsoft.azure.storage.photosync.app.util.DestinationStorage
+import com.microsoft.azure.storage.photosync.core.DownloadStoragePolicy
 import com.microsoft.azure.storage.photosync.core.TransferDirection
+import com.microsoft.azure.storage.photosync.core.TransferIdentity
 
 /**
- * Processes queued/retry-pending download transfers. Per spec sections 3.3
- * and 6.2, automatic downloads only run while the device reports it is
- * charging; that constraint is enforced by the WorkManager constraints
- * configured in WorkScheduler, not by this worker itself.
+ * Processes queued/retry-pending download transfers while enforcing the
+ * configured free-space threshold before every file.
  */
 class DownloadWorker(
     private val appContext: Context,
@@ -46,18 +48,26 @@ class DownloadWorker(
         val deviceId = settings.getOrCreateDeviceId()
         val baseUrl = settings.getApiBaseUrl()
         val destinationUriString = settings.getDownloadDestinationUri()
-        if (baseUrl.isBlank() || destinationUriString == null) return Result.failure()
+        if (destinationUriString == null) return Result.failure()
 
         val destinationUri = Uri.parse(destinationUriString)
+        val minimumFreePercent = settings.getDownloadMinFreeStoragePercent()
+        val destinationStorage = DestinationStorage(appContext)
         val credentialStore = CredentialStore(appContext)
-        val api = container.apiService(baseUrl) { credentialStore.getToken() }
+        val directConfiguration = credentialStore.getAzureSasConfiguration()
+        if (directConfiguration == null && baseUrl.isBlank()) return Result.failure()
+        val api = if (directConfiguration == null) {
+            container.apiService(baseUrl) { credentialStore.getToken() }
+        } else {
+            null
+        }
         val transferDao = container.database.localTransferDao()
 
         val repository = DownloadRepository(
             context = appContext,
             api = api,
             transferDao = transferDao,
-            pendingStateUpdateDao = container.database.pendingStateUpdateDao(),
+            pendingStateUpdateDao = if (api != null) container.database.pendingStateUpdateDao() else null,
             allowOverwrite = settings.isDownloadOverwriteOnConflict()
         )
 
@@ -70,32 +80,75 @@ class DownloadWorker(
         )
         if (batch.isEmpty()) return Result.success()
 
-        // Re-fetch the manifest immediately before processing so each transfer
-        // uses a fresh, still-valid SAS URL rather than one persisted earlier.
-        val manifestResponse = api.getDownloadManifest(deviceId)
-        if (!manifestResponse.isSuccessful || manifestResponse.body() == null) {
-            return if (manifestResponse.code() in DownloadManifestWorker.RETRYABLE_HTTP_CODES) {
-                Result.retry()
-            } else {
-                Result.failure()
+        var sasUrlByTransferId = emptyMap<String, String>()
+        var sasUrlByIdentityKey = emptyMap<String, String>()
+        if (api != null) {
+            // Re-fetch the API manifest immediately before processing so each
+            // transfer uses a fresh SAS URL rather than a persisted credential.
+            val manifestResponse = api.getDownloadManifest(deviceId)
+            if (!manifestResponse.isSuccessful || manifestResponse.body() == null) {
+                return if (manifestResponse.code() in DownloadManifestWorker.RETRYABLE_HTTP_CODES) {
+                    Result.retry()
+                } else {
+                    Result.failure()
+                }
+            }
+            val manifestItems = manifestResponse.body()!!.items
+            sasUrlByTransferId = manifestItems.associate { it.transferId to it.sasUrl }
+            sasUrlByIdentityKey = manifestItems.associate { item ->
+                TransferIdentity.DownloadIdentity(
+                    deviceId = deviceId,
+                    blobContainer = item.blobContainer,
+                    blobName = item.blobName,
+                    blobEtagOrVersion = item.blobEtagOrVersion,
+                    expectedFileSize = item.fileSize
+                ).key() to item.sasUrl
             }
         }
-        val sasUrlByTransferId = manifestResponse.body()!!.items.associate { it.transferId to it.sasUrl }
+        val directBlobClient = directConfiguration?.let(::AzureSasBlobClient)
 
         var anyRetryable = false
+        var stoppedForStorage = false
+        var processedAny = false
         for (transfer in batch) {
-            val sasUrl = sasUrlByTransferId[transfer.transferId] ?: continue
+            val storageSnapshot = try {
+                destinationStorage.snapshot(destinationUri)
+            } catch (e: RuntimeException) {
+                return Result.retry()
+            }
+            if (!DownloadStoragePolicy.canDownload(
+                    snapshot = storageSnapshot,
+                    nextFileSizeBytes = transfer.fileSize,
+                    minimumFreePercent = minimumFreePercent
+                )
+            ) {
+                // Keep this transfer queued. The DAO's stable oldest-first
+                // ordering makes it the first item retried after space is freed.
+                stoppedForStorage = true
+                break
+            }
+
+            val sasUrl = if (directBlobClient != null) {
+                transfer.blobName?.let(directBlobClient::downloadBlobSasUrl)
+            } else {
+                sasUrlByTransferId[transfer.transferId] ?: sasUrlByIdentityKey[transfer.identityKey]
+            }
+            if (sasUrl == null) {
+                anyRetryable = true
+                continue
+            }
+            processedAny = true
             when (repository.process(destinationUri, transfer, sasUrl)) {
                 is DownloadOutcome.RetryableFailure -> anyRetryable = true
                 else -> Unit
             }
         }
 
-        if (batch.isNotEmpty() && !anyRetryable) {
+        if (processedAny && !anyRetryable && !stoppedForStorage) {
             settings.setLastSuccessfulSyncUtcEpochMillis(System.currentTimeMillis())
         }
 
-        return if (anyRetryable) Result.retry() else Result.success()
+        return if (anyRetryable || stoppedForStorage) Result.retry() else Result.success()
     }
 
     private suspend fun setForegroundSafely() {

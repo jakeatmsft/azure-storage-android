@@ -19,8 +19,8 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
- * A photo/video discovered on the device via MediaStore. One row per
- * MediaStore media item that is a candidate for upload.
+ * A file discovered under a user-selected SAF folder. One row per document
+ * that is a candidate for upload.
  */
 @Entity(tableName = "local_file")
 data class LocalFile(

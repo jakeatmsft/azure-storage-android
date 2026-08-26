@@ -19,6 +19,7 @@ import com.microsoft.azure.storage.photosync.app.data.local.dao.AppSettingDao
 import com.microsoft.azure.storage.photosync.app.data.local.entity.AppMode
 import com.microsoft.azure.storage.photosync.app.data.local.entity.AppSetting
 import com.microsoft.azure.storage.photosync.app.data.local.entity.AppSettingKeys
+import com.microsoft.azure.storage.photosync.core.DownloadStoragePolicy
 import java.util.UUID
 
 /**
@@ -43,7 +44,18 @@ class SettingsRepository(private val dao: AppSettingDao) {
         dao.get(AppSettingKeys.APP_MODE)?.let { runCatching { AppMode.valueOf(it) }.getOrNull() }
             ?: AppMode.UPLOAD_AND_DOWNLOAD
 
-    suspend fun setAppMode(mode: AppMode) = dao.upsert(AppSetting(AppSettingKeys.APP_MODE, mode.name))
+    suspend fun setAppMode(mode: AppMode) {
+        if (mode != AppMode.PAUSED) {
+            dao.upsert(AppSetting(AppSettingKeys.LAST_ACTIVE_APP_MODE, mode.name))
+        }
+        dao.upsert(AppSetting(AppSettingKeys.APP_MODE, mode.name))
+    }
+
+    suspend fun getLastActiveAppMode(): AppMode =
+        dao.get(AppSettingKeys.LAST_ACTIVE_APP_MODE)
+            ?.let { runCatching { AppMode.valueOf(it) }.getOrNull() }
+            ?.takeIf { it != AppMode.PAUSED }
+            ?: AppMode.UPLOAD_AND_DOWNLOAD
 
     suspend fun isUploadWifiOnly(): Boolean = getBoolean(AppSettingKeys.UPLOAD_WIFI_ONLY, default = false)
     suspend fun setUploadWifiOnly(value: Boolean) = setBoolean(AppSettingKeys.UPLOAD_WIFI_ONLY, value)
@@ -57,11 +69,21 @@ class SettingsRepository(private val dao: AppSettingDao) {
     suspend fun isUploadChecksumEnabled(): Boolean = getBoolean(AppSettingKeys.UPLOAD_CALCULATE_CHECKSUM, default = true)
     suspend fun setUploadChecksumEnabled(value: Boolean) = setBoolean(AppSettingKeys.UPLOAD_CALCULATE_CHECKSUM, value)
 
-    suspend fun getUploadAdditionalFolders(): List<String> =
-        (dao.get(AppSettingKeys.UPLOAD_ADDITIONAL_FOLDERS) ?: "").split(",").filter { it.isNotBlank() }
+    suspend fun getUploadFolderUris(): List<String> =
+        (dao.get(AppSettingKeys.UPLOAD_FOLDER_URIS) ?: "")
+            .lineSequence()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .toList()
 
-    suspend fun setUploadAdditionalFolders(folders: List<String>) =
-        dao.upsert(AppSetting(AppSettingKeys.UPLOAD_ADDITIONAL_FOLDERS, folders.joinToString(",")))
+    suspend fun setUploadFolderUris(folderUris: List<String>) =
+        dao.upsert(
+            AppSetting(
+                AppSettingKeys.UPLOAD_FOLDER_URIS,
+                folderUris.map(String::trim).filter(String::isNotBlank).distinct().joinToString("\n")
+            )
+        )
 
     suspend fun getDownloadDestinationUri(): String? = dao.get(AppSettingKeys.DOWNLOAD_DESTINATION_URI)
 
@@ -76,6 +98,17 @@ class SettingsRepository(private val dao: AppSettingDao) {
 
     suspend fun setDownloadOverwriteOnConflict(value: Boolean) =
         setBoolean(AppSettingKeys.DOWNLOAD_OVERWRITE_ON_CONFLICT, value)
+
+    suspend fun getDownloadMinFreeStoragePercent(): Int =
+        dao.get(AppSettingKeys.DOWNLOAD_MIN_FREE_STORAGE_PERCENT)
+            ?.toIntOrNull()
+            ?.takeIf { it in DownloadStoragePolicy.MIN_FREE_PERCENT..DownloadStoragePolicy.MAX_FREE_PERCENT }
+            ?: DownloadStoragePolicy.DEFAULT_MIN_FREE_PERCENT
+
+    suspend fun setDownloadMinFreeStoragePercent(value: Int) {
+        require(value in DownloadStoragePolicy.MIN_FREE_PERCENT..DownloadStoragePolicy.MAX_FREE_PERCENT)
+        dao.upsert(AppSetting(AppSettingKeys.DOWNLOAD_MIN_FREE_STORAGE_PERCENT, value.toString()))
+    }
 
     suspend fun getApiBaseUrl(): String = dao.get(AppSettingKeys.API_BASE_URL) ?: ""
     suspend fun setApiBaseUrl(url: String) = dao.upsert(AppSetting(AppSettingKeys.API_BASE_URL, url))

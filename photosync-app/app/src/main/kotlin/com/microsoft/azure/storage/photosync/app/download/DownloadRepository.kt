@@ -18,6 +18,7 @@ package com.microsoft.azure.storage.photosync.app.download
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.microsoft.azure.storage.StorageException
 import com.microsoft.azure.storage.blob.CloudBlockBlob
 import com.microsoft.azure.storage.photosync.app.data.local.dao.LocalTransferDao
 import com.microsoft.azure.storage.photosync.app.data.local.entity.LocalTransfer
@@ -43,9 +44,9 @@ sealed class DownloadOutcome {
  */
 class DownloadRepository(
     private val context: Context,
-    private val api: PhotoSyncApiService,
+    private val api: PhotoSyncApiService?,
     private val transferDao: LocalTransferDao,
-    private val pendingStateUpdateDao: com.microsoft.azure.storage.photosync.app.data.local.dao.PendingStateUpdateDao,
+    private val pendingStateUpdateDao: com.microsoft.azure.storage.photosync.app.data.local.dao.PendingStateUpdateDao?,
     private val allowOverwrite: Boolean
 ) {
 
@@ -87,7 +88,11 @@ class DownloadRepository(
             current = transition(current, TransferState.TRANSFERRING)
 
             val tempFile = destinationDir.createFile("application/octet-stream", "$finalName.part")
-                ?: return DownloadOutcome.RetryableFailure("Unable to create temporary file")
+            if (tempFile == null) {
+                val message = "Unable to create temporary file"
+                markRetryable(current, message)
+                return DownloadOutcome.RetryableFailure(message)
+            }
 
             downloadToFile(sasUrl, tempFile.uri)
 
@@ -106,10 +111,18 @@ class DownloadRepository(
 
             current = transition(current, TransferState.COMPLETING)
             if (!tempFile.renameTo(finalName)) {
-                return DownloadOutcome.RetryableFailure("Unable to rename temporary file to final name")
+                val message = "Unable to rename temporary file to final name"
+                markRetryable(current, message)
+                return DownloadOutcome.RetryableFailure(message)
             }
 
-            val completeResponse = api.completeDownloadTransfer(
+            val apiClient = api
+            if (apiClient == null) {
+                transition(current, TransferState.COMPLETED, completedUtcEpochMillis = System.currentTimeMillis())
+                return DownloadOutcome.Success
+            }
+
+            val completeResponse = apiClient.completeDownloadTransfer(
                 current.transferId,
                 CompleteDownloadTransferRequest(
                     transferId = current.transferId,
@@ -133,6 +146,15 @@ class DownloadRepository(
         } catch (e: java.io.IOException) {
             markRetryable(current, e.message ?: "IO error")
             return DownloadOutcome.RetryableFailure(e.message ?: "IO error")
+        } catch (e: StorageException) {
+            val message = e.message ?: "Azure Storage error"
+            return if (e.httpStatusCode in DownloadManifestWorker.RETRYABLE_HTTP_CODES) {
+                markRetryable(current, message)
+                DownloadOutcome.RetryableFailure(message)
+            } else {
+                markFailed(current, message)
+                DownloadOutcome.PermanentFailure(message)
+            }
         }
     }
 
@@ -161,7 +183,7 @@ class DownloadRepository(
                 sha256 = sha256,
                 idempotencyKey = transfer.transferId
             )
-            pendingStateUpdateDao.insert(
+            requireNotNull(pendingStateUpdateDao).insert(
                 com.microsoft.azure.storage.photosync.app.data.local.entity.PendingStateUpdate(
                     transferId = transfer.transferId,
                     updateType = "complete_download",

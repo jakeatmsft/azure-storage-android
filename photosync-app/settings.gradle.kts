@@ -32,6 +32,7 @@ pluginManagement {
             filter {
                 includeGroupByRegex("com\\.android.*")
                 includeGroupByRegex("com\\.google\\.gms.*")
+                includeGroupByRegex("com\\.google\\.testing.*")
                 includeGroupByRegex("androidx.*")
             }
         }

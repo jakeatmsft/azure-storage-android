@@ -58,6 +58,11 @@ class TransferStateMachineTest {
     }
 
     @Test
+    fun `retry can skip a download already completed before interruption`() {
+        assertTrue(TransferStateMachine.canTransition(TransferState.RETRY_PENDING, TransferState.SKIPPED))
+    }
+
+    @Test
     fun `requireTransition throws on illegal transitions`() {
         try {
             TransferStateMachine.requireTransition(TransferState.COMPLETED, TransferState.QUEUED)

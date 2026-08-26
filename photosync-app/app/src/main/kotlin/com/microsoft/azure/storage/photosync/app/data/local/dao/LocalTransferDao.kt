@@ -45,7 +45,7 @@ interface LocalTransferDao {
         "SELECT * FROM local_transfer WHERE direction = :direction " +
             "AND state IN ('QUEUED', 'RETRY_PENDING') " +
             "AND (nextRetryUtcEpochMillis IS NULL OR nextRetryUtcEpochMillis <= :nowUtcEpochMillis) " +
-            "ORDER BY createdUtcEpochMillis ASC LIMIT :limit"
+            "ORDER BY createdUtcEpochMillis ASC, transferId ASC LIMIT :limit"
     )
     suspend fun nextQueuedOrRetryable(direction: String, nowUtcEpochMillis: Long, limit: Int): List<LocalTransfer>
 
@@ -72,6 +72,19 @@ interface LocalTransferDao {
     )
     fun observeFiltered(direction: String?, state: String?): Flow<List<LocalTransfer>>
 
-    @Query("DELETE FROM local_transfer WHERE state = 'COMPLETED' AND completedUtcEpochMillis < :olderThanUtcEpochMillis")
-    suspend fun deleteCompletedOlderThan(olderThanUtcEpochMillis: Long): Int
+    @Query(
+        "DELETE FROM local_transfer WHERE state = 'COMPLETED' " +
+            "AND direction != :retainedDirection " +
+            "AND completedUtcEpochMillis < :olderThanUtcEpochMillis"
+    )
+    suspend fun deleteCompletedOlderThan(
+        olderThanUtcEpochMillis: Long,
+        retainedDirection: String
+    ): Int
+
+    @Query("DELETE FROM local_transfer WHERE state NOT IN ('COMPLETED', 'SKIPPED')")
+    suspend fun deleteUnfinished(): Int
+
+    @Query("DELETE FROM local_transfer WHERE direction = :direction AND state NOT IN ('COMPLETED', 'SKIPPED')")
+    suspend fun deleteUnfinished(direction: String): Int
 }

@@ -112,6 +112,7 @@ object TransferStateMachine {
             TransferState.TRANSFERRING,
             TransferState.AUTHORIZING,
             TransferState.FAILED,
+            TransferState.SKIPPED,
             TransferState.CANCELLED
         ),
         TransferState.INTERRUPTED to setOf(

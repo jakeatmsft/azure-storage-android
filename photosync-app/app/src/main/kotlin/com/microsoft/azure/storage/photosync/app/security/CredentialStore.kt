@@ -19,6 +19,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.microsoft.azure.storage.photosync.core.AzureSasConfiguration
 
 /**
  * Stores the device's revocable API credential using Android
@@ -52,8 +53,48 @@ class CredentialStore(context: Context) {
         prefs.edit().remove(KEY_DEVICE_TOKEN).apply()
     }
 
+    fun getAzureSasConfiguration(): AzureSasConfiguration? {
+        val blobServiceUrl = prefs.getString(KEY_BLOB_SERVICE_URL, null) ?: return null
+        val uploadContainer = prefs.getString(KEY_UPLOAD_CONTAINER, null) ?: return null
+        val downloadContainer = prefs.getString(KEY_DOWNLOAD_CONTAINER, null) ?: return null
+        val sasToken = prefs.getString(KEY_AZURE_SAS_TOKEN, null) ?: return null
+        val expiresUtc = prefs.getString(KEY_AZURE_SAS_EXPIRY, null) ?: return null
+        return AzureSasConfiguration(
+            blobServiceUrl = blobServiceUrl,
+            uploadContainer = uploadContainer,
+            downloadContainer = downloadContainer,
+            sasToken = sasToken,
+            expiresUtc = expiresUtc
+        )
+    }
+
+    fun setAzureSasConfiguration(configuration: AzureSasConfiguration) {
+        prefs.edit()
+            .putString(KEY_BLOB_SERVICE_URL, configuration.blobServiceUrl)
+            .putString(KEY_UPLOAD_CONTAINER, configuration.uploadContainer)
+            .putString(KEY_DOWNLOAD_CONTAINER, configuration.downloadContainer)
+            .putString(KEY_AZURE_SAS_TOKEN, configuration.sasToken)
+            .putString(KEY_AZURE_SAS_EXPIRY, configuration.expiresUtc)
+            .apply()
+    }
+
+    fun clearAzureSasConfiguration() {
+        prefs.edit()
+            .remove(KEY_BLOB_SERVICE_URL)
+            .remove(KEY_UPLOAD_CONTAINER)
+            .remove(KEY_DOWNLOAD_CONTAINER)
+            .remove(KEY_AZURE_SAS_TOKEN)
+            .remove(KEY_AZURE_SAS_EXPIRY)
+            .apply()
+    }
+
     companion object {
         private const val PREFS_FILE_NAME = "photosync_secure_prefs"
         private const val KEY_DEVICE_TOKEN = "device_token"
+        private const val KEY_BLOB_SERVICE_URL = "blob_service_url"
+        private const val KEY_UPLOAD_CONTAINER = "upload_container"
+        private const val KEY_DOWNLOAD_CONTAINER = "download_container"
+        private const val KEY_AZURE_SAS_TOKEN = "azure_sas_token"
+        private const val KEY_AZURE_SAS_EXPIRY = "azure_sas_expiry"
     }
 }

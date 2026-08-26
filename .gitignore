@@ -22,6 +22,8 @@ tmp/**/*
 *.swp
 *~.nib
 local.properties
+photosync-sas*.png
+photosync-app/dist/*.apk
 */.settings/**
 .loadpath
 

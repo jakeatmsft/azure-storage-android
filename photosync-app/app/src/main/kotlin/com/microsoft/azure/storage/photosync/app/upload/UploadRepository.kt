@@ -61,12 +61,13 @@ class UploadRepository(
 
         try {
             if (current.state == TransferState.QUEUED.name || current.state == TransferState.RETRY_PENDING.name) {
-                if (current.localMediaId == null) {
+                val localMediaId = current.localMediaId
+                if (localMediaId == null) {
                     markFailed(current, "Missing localMediaId")
                     return UploadOutcome.PermanentFailure("Missing localMediaId")
                 }
 
-                val localFile = localFileDao.findByMediaId(current.localMediaId)
+                val localFile = localFileDao.findByMediaId(localMediaId)
                 if (localFile == null) {
                     markFailed(current, "Source media file no longer available")
                     return UploadOutcome.PermanentFailure("Source media file no longer available")
@@ -78,7 +79,7 @@ class UploadRepository(
                 val authResponse = api.createUploadTransfer(
                     CreateUploadTransferRequest(
                         deviceId = deviceId,
-                        mediaId = current.localMediaId,
+                        mediaId = localMediaId,
                         fileName = current.fileName,
                         fileSize = current.fileSize,
                         contentType = current.contentType,

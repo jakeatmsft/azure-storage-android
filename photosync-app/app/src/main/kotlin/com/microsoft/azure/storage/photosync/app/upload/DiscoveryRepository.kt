@@ -25,7 +25,7 @@ import com.microsoft.azure.storage.photosync.core.TransferState
 import java.util.UUID
 
 /**
- * Turns MediaStore discoveries into local `LocalFile` / `LocalTransfer`
+ * Turns selected-folder discoveries into local `LocalFile` / `LocalTransfer`
  * (queued upload) rows, applying the duplicate-prevention rule of spec
  * section 7.1: if a completed upload transfer already exists for a
  * candidate's identity key, the candidate is skipped rather than queued

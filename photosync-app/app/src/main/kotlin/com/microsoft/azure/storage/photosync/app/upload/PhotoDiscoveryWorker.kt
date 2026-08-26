@@ -19,10 +19,10 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.microsoft.azure.storage.photosync.app.AppContainer
+import com.microsoft.azure.storage.photosync.app.security.CredentialStore
 
 /**
- * Finds new or changed photos via MediaStore and queues them for upload
- * (spec section 6, "PhotoDiscoveryWorker": finds new or changed photos).
+ * Finds new or changed files in the selected SAF folders and queues them for upload.
  */
 class PhotoDiscoveryWorker(
     context: Context,
@@ -33,6 +33,10 @@ class PhotoDiscoveryWorker(
         val container = AppContainer.getInstance(applicationContext)
         val settings = container.settingsRepository
         val deviceId = settings.getOrCreateDeviceId()
+        val directConfiguration = CredentialStore(applicationContext).getAzureSasConfiguration()
+        val identityScope = directConfiguration?.let {
+            "$deviceId@${it.accountHost}/${it.uploadContainer}"
+        } ?: deviceId
 
         val scanner = MediaStoreScanner(applicationContext)
         val discoveryRepository = DiscoveryRepository(
@@ -40,13 +44,13 @@ class PhotoDiscoveryWorker(
             container.database.localTransferDao()
         )
 
-        val sinceEpochSeconds = (container.database.localFileDao().latestKnownModifiedUtc() ?: 0L) / 1000
-        val additionalFolders = settings.getUploadAdditionalFolders()
+        val uploadFolderUris = settings.getUploadFolderUris()
+        if (uploadFolderUris.isEmpty()) return Result.success()
         val includeVideos = settings.isUploadIncludeVideos()
 
         return try {
-            val candidates = scanner.scan(sinceEpochSeconds, additionalFolders, includeVideos)
-            discoveryRepository.recordDiscoveries(deviceId, candidates)
+            val candidates = scanner.scan(uploadFolderUris, includeVideos)
+            discoveryRepository.recordDiscoveries(identityScope, candidates)
             Result.success()
         } catch (e: SecurityException) {
             // Missing media read permission; do not retry until the user grants it.

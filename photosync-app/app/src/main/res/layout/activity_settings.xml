@@ -12,8 +12,87 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:text="@string/settings_mode_section"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/radioMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <RadioButton
+                android:id="@+id/radioModeUpload"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_mode_upload" />
+
+            <RadioButton
+                android:id="@+id/radioModeDownload"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_mode_download" />
+
+            <RadioButton
+                android:id="@+id/radioModeBoth"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_mode_both" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/settings_storage_access_section"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textStorageCredentialStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_sas_not_configured" />
+
+        <Button
+            android:id="@+id/buttonScanSasQr"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_scan_sas_qr" />
+
+        <Button
+            android:id="@+id/buttonClearSas"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_clear_sas" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_sas_security_note" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
             android:text="@string/settings_upload_section"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textUploadFolders"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_upload_folders_empty" />
+
+        <Button
+            android:id="@+id/buttonAddUploadFolder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_add_upload_folder" />
+
+        <Button
+            android:id="@+id/buttonClearUploadFolders"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_clear_upload_folders" />
 
         <CheckBox
             android:id="@+id/checkUploadWifiOnly"
@@ -31,7 +110,7 @@
             android:id="@+id/checkUploadIncludeVideos"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Include videos" />
+            android:text="@string/settings_include_videos" />
 
         <CheckBox
             android:id="@+id/checkUploadChecksum"
@@ -68,6 +147,23 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Overwrite conflicting files" />
+
+        <TextView
+            android:id="@+id/textDownloadMinFreePercent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" />
+
+        <SeekBar
+            android:id="@+id/seekDownloadMinFreePercent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="98" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_download_min_free_space_help" />
 
     </LinearLayout>
 </ScrollView>

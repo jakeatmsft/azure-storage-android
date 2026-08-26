@@ -46,11 +46,16 @@ class ReconciliationWorker(
     override suspend fun doWork(): Result {
         val container = AppContainer.getInstance(appContext)
         val settings = container.settingsRepository
-        val baseUrl = settings.getApiBaseUrl()
-        if (baseUrl.isBlank()) return Result.success()
-
         val credentialStore = CredentialStore(appContext)
-        val api = container.apiService(baseUrl) { credentialStore.getToken() }
+        val directConfiguration = credentialStore.getAzureSasConfiguration()
+        val baseUrl = settings.getApiBaseUrl()
+        if (directConfiguration == null && baseUrl.isBlank()) return Result.success()
+
+        val api = if (directConfiguration == null) {
+            container.apiService(baseUrl) { credentialStore.getToken() }
+        } else {
+            null
+        }
         val transferDao = container.database.localTransferDao()
 
         val now = System.currentTimeMillis()
@@ -60,6 +65,22 @@ class ReconciliationWorker(
         for (transfer in interrupted) {
             val heartbeat = transfer.lastHeartbeatUtcEpochMillis ?: transfer.createdUtcEpochMillis
             if (now - heartbeat < INTERRUPTION_GRACE_PERIOD_MILLIS) continue
+
+            if (api == null) {
+                // Direct SAS transfers use deterministic blob names. Retrying is
+                // idempotent for uploads; downloads resolve an already-renamed
+                // local file without fetching a duplicate.
+                transferDao.update(
+                    transfer.copy(
+                        state = TransferState.RETRY_PENDING.name,
+                        attemptCount = transfer.attemptCount + 1,
+                        lastErrorCategory = "RETRYABLE",
+                        lastErrorMessage = "Interrupted direct transfer restarted by reconciliation",
+                        isRetryable = true
+                    )
+                )
+                continue
+            }
 
             try {
                 val response = api.getTransfer(transfer.transferId)

@@ -34,21 +34,26 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Schedules the WorkManager workers (spec section 6) with the constraints
- * required by each direction: uploads are configurable (Wi-Fi/charging
- * optional), downloads always require charging (spec 3.3, 6.2) even though
- * Android may still delay execution after the constraint is satisfied.
+ * required by each direction. Upload Wi-Fi/charging and download Wi-Fi are
+ * configurable; Android may still defer background work for battery health.
  */
 object WorkScheduler {
 
-    private const val DISCOVERY_INTERVAL_MINUTES = 30L
-    private const val UPLOAD_INTERVAL_MINUTES = 30L
-    private const val DOWNLOAD_MANIFEST_INTERVAL_MINUTES = 60L
-    private const val DOWNLOAD_INTERVAL_MINUTES = 60L
+    private const val DISCOVERY_INTERVAL_MINUTES = 15L
+    private const val UPLOAD_INTERVAL_MINUTES = 15L
+    private const val DOWNLOAD_MANIFEST_INTERVAL_MINUTES = 15L
+    private const val DOWNLOAD_INTERVAL_MINUTES = 15L
     private const val RECONCILIATION_INTERVAL_MINUTES = 60L
     private const val STATE_UPDATE_INTERVAL_MINUTES = 15L
     private const val CLEANUP_INTERVAL_MINUTES = 24 * 60L
 
-    fun reschedule(context: Context, mode: AppMode, uploadWifiOnly: Boolean, downloadWifiOnly: Boolean) {
+    fun reschedule(
+        context: Context,
+        mode: AppMode,
+        uploadWifiOnly: Boolean,
+        uploadChargingOnly: Boolean,
+        downloadWifiOnly: Boolean
+    ) {
         val workManager = WorkManager.getInstance(context)
 
         val uploadEnabled = mode == AppMode.UPLOAD_ONLY || mode == AppMode.UPLOAD_AND_DOWNLOAD
@@ -62,7 +67,7 @@ object WorkScheduler {
 
             workManager.enqueueUniquePeriodicWork(
                 PhotoDiscoveryWorker.UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<PhotoDiscoveryWorker>(DISCOVERY_INTERVAL_MINUTES, TimeUnit.MINUTES)
                     .setConstraints(discoveryConstraints)
                     .build()
@@ -70,13 +75,14 @@ object WorkScheduler {
 
             val uploadConstraints = Constraints.Builder()
                 .setRequiredNetworkType(uploadNetworkType)
+                .setRequiresCharging(uploadChargingOnly)
                 .setRequiresBatteryNotLow(true)
                 .setRequiresStorageNotLow(true)
                 .build()
 
             workManager.enqueueUniquePeriodicWork(
                 UploadWorker.UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<UploadWorker>(UPLOAD_INTERVAL_MINUTES, TimeUnit.MINUTES)
                     .setConstraints(uploadConstraints)
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
@@ -94,26 +100,23 @@ object WorkScheduler {
 
             workManager.enqueueUniquePeriodicWork(
                 DownloadManifestWorker.UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<DownloadManifestWorker>(
                     DOWNLOAD_MANIFEST_INTERVAL_MINUTES,
                     TimeUnit.MINUTES
                 ).setConstraints(manifestConstraints).build()
             )
 
-            // Required: network connected + charging (spec 6.2). Wi-Fi-only and
-            // battery/storage constraints are additionally applied when enabled.
             val downloadNetworkType = if (downloadWifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
             val downloadConstraints = Constraints.Builder()
                 .setRequiredNetworkType(downloadNetworkType)
-                .setRequiresCharging(true)
                 .setRequiresBatteryNotLow(true)
                 .setRequiresStorageNotLow(true)
                 .build()
 
             workManager.enqueueUniquePeriodicWork(
                 DownloadWorker.UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<DownloadWorker>(DOWNLOAD_INTERVAL_MINUTES, TimeUnit.MINUTES)
                     .setConstraints(downloadConstraints)
                     .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
@@ -129,21 +132,21 @@ object WorkScheduler {
         // orphaned files are still cleaned up; they perform no new transfers.
         workManager.enqueueUniquePeriodicWork(
             ReconciliationWorker.UNIQUE_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<ReconciliationWorker>(RECONCILIATION_INTERVAL_MINUTES, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()
         )
         workManager.enqueueUniquePeriodicWork(
             StateUpdateWorker.UNIQUE_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<StateUpdateWorker>(STATE_UPDATE_INTERVAL_MINUTES, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()
         )
         workManager.enqueueUniquePeriodicWork(
             CleanupWorker.UNIQUE_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             PeriodicWorkRequestBuilder<CleanupWorker>(CLEANUP_INTERVAL_MINUTES, TimeUnit.MINUTES).build()
         )
     }

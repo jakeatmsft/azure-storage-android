@@ -43,24 +43,33 @@ class UploadWorker(
         val container = AppContainer.getInstance(appContext)
         val settings = container.settingsRepository
         val deviceId = settings.getOrCreateDeviceId()
-        val baseUrl = settings.getApiBaseUrl()
-        if (baseUrl.isBlank()) {
-            // Device not yet configured to talk to an API endpoint.
-            return Result.failure()
-        }
-
         val credentialStore = CredentialStore(appContext)
-        val api = container.apiService(baseUrl) { credentialStore.getToken() }
+        val directConfiguration = credentialStore.getAzureSasConfiguration()
+        val baseUrl = settings.getApiBaseUrl()
+        if (directConfiguration == null && baseUrl.isBlank()) return Result.failure()
         val transferDao = container.database.localTransferDao()
-
-        val repository = UploadRepository(
-            context = appContext,
-            api = api,
-            transferDao = transferDao,
-            localFileDao = container.database.localFileDao(),
-            pendingStateUpdateDao = container.database.pendingStateUpdateDao(),
-            calculateChecksum = settings.isUploadChecksumEnabled()
-        )
+        val calculateChecksum = settings.isUploadChecksumEnabled()
+        val directRepository = directConfiguration?.let {
+            DirectSasUploadRepository(
+                context = appContext,
+                configuration = it,
+                transferDao = transferDao,
+                localFileDao = container.database.localFileDao(),
+                calculateChecksum = calculateChecksum
+            )
+        }
+        val apiRepository = if (directConfiguration == null) {
+            UploadRepository(
+                context = appContext,
+                api = container.apiService(baseUrl) { credentialStore.getToken() },
+                transferDao = transferDao,
+                localFileDao = container.database.localFileDao(),
+                pendingStateUpdateDao = container.database.pendingStateUpdateDao(),
+                calculateChecksum = calculateChecksum
+            )
+        } else {
+            null
+        }
 
         setForegroundSafely()
 
@@ -74,7 +83,9 @@ class UploadWorker(
 
         var anyRetryable = false
         for (transfer in batch) {
-            when (val outcome = repository.process(deviceId, transfer)) {
+            val outcome = directRepository?.process(deviceId, transfer)
+                ?: requireNotNull(apiRepository).process(deviceId, transfer)
+            when (outcome) {
                 is UploadOutcome.RetryableFailure -> anyRetryable = true
                 else -> Unit
             }
